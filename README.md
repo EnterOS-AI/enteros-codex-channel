@@ -70,6 +70,31 @@ pytest -q
 
 Tests are entirely real-subprocess (no mocking the spawn boundary) so the boot path is covered the same way the daemon runs in production.
 
+## Releasing
+
+Tag-on-push triggers `publish.yml` which builds + publishes to PyPI via OIDC trusted publishing (no API token needed).
+
+```sh
+# Bump pyproject.toml `version`, commit, then:
+git tag v0.1.1 && git push origin v0.1.1
+```
+
+The workflow refuses to publish if the tag doesn't match `pyproject.toml`'s `version` — keeps PyPI versions and git tags in lockstep.
+
+**One-time PyPI setup** (before the first release):
+
+1. Create the project on PyPI by uploading the first wheel manually, OR
+2. Pre-register the project on PyPI under a "Pending publisher" config so the first tagged push creates it.
+
+Either way, on the project's PyPI page → "Manage" → "Publishing" → "Add a new publisher", configure:
+
+- Owner: `Molecule-AI`
+- Repository: `codex-channel-molecule`
+- Workflow filename: `publish.yml`
+- Environment name: `pypi`
+
+After this, every `git push origin v*.*.*` ships the wheel to PyPI without any further intervention.
+
 ## License
 
 Apache-2.0
