@@ -29,6 +29,14 @@ logger = logging.getLogger(__name__)
 # read timeout. 60s is the same default the MCP tool advertises.
 _LONG_POLL_SECS = 60.0
 
+# Exponential backoff bounds for wait_for_message errors. Doubles from
+# _BACKOFF_INITIAL up to _BACKOFF_MAX after each consecutive failure;
+# resets to zero on the first successful poll. Without this, a stale
+# token / DNS failure / dead platform turns into a tight 1-Hz retry
+# storm — bad citizenship across N operator daemons.
+_BACKOFF_INITIAL = 1.0
+_BACKOFF_MAX = 60.0
+
 
 class _Tools(Protocol):
     """Minimal interface the bridge needs from molecule_runtime.
@@ -51,34 +59,32 @@ class _RealTools:
     """Production implementation — calls into the installed
     molecule-ai-workspace-runtime wheel.
 
-    Imported lazily so test runs don't require the wheel.
+    The wheel is imported lazily on first instantiation so unit tests
+    that supply a fake `_Tools` don't require it.
     """
 
-    async def wait_for_message(self, timeout_secs: float) -> str:
-        from molecule_runtime.a2a_tools import tool_wait_for_message
+    def __init__(self) -> None:
+        from molecule_runtime import a2a_tools
 
-        return await tool_wait_for_message(timeout_secs=timeout_secs)
+        self._tools = a2a_tools
+
+    async def wait_for_message(self, timeout_secs: float) -> str:
+        return await self._tools.tool_wait_for_message(timeout_secs=timeout_secs)
 
     async def inbox_pop(self, activity_id: str) -> str:
-        from molecule_runtime.a2a_tools import tool_inbox_pop
-
-        return await tool_inbox_pop(activity_id=activity_id)
+        return await self._tools.tool_inbox_pop(activity_id=activity_id)
 
     async def send_message_to_user(
         self, message: str, workspace_id: Optional[str]
     ) -> str:
-        from molecule_runtime.a2a_tools import tool_send_message_to_user
-
-        return await tool_send_message_to_user(
+        return await self._tools.tool_send_message_to_user(
             message=message, workspace_id=workspace_id
         )
 
     async def delegate_task(
         self, workspace_id: str, task: str, source_workspace_id: Optional[str]
     ) -> str:
-        from molecule_runtime.a2a_tools import tool_delegate_task
-
-        return await tool_delegate_task(
+        return await self._tools.tool_delegate_task(
             workspace_id=workspace_id,
             task=task,
             source_workspace_id=source_workspace_id,
@@ -207,14 +213,19 @@ async def run_bridge(
     session_store = session_store or _SessionStore(_state_dir() / "sessions.json")
 
     cycle = 0
+    backoff = 0.0
     while iterations is None or cycle < iterations:
         cycle += 1
         try:
             payload = await tools.wait_for_message(timeout_secs=_LONG_POLL_SECS)
         except Exception as exc:
-            logger.warning("wait_for_message raised: %s", exc)
-            await asyncio.sleep(1.0)
+            backoff = min(backoff * 2, _BACKOFF_MAX) if backoff else _BACKOFF_INITIAL
+            logger.warning(
+                "wait_for_message raised: %s — backing off %.1fs", exc, backoff,
+            )
+            await asyncio.sleep(backoff)
             continue
+        backoff = 0.0
 
         message = _extract_inbox_message(payload)
         if message is None:

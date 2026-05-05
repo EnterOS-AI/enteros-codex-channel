@@ -26,7 +26,7 @@ canvas user / peer agent ──► molecule platform inbox
                          canvas chat / peer workspace
 ```
 
-Per chat thread (one canvas-user thread or one peer-workspace thread) gets its own codex session_id, persisted to `~/.codex-channel-molecule/sessions.json` so daemon restarts don't lose conversation context.
+Per chat thread (one canvas-user thread or one peer-workspace thread) gets its own codex session_id, persisted to `~/.codex-channel-molecule/sessions.json` so daemon restarts don't lose conversation context. Set `CODEX_CHANNEL_MOLECULE_STATE_DIR` to override the default location (e.g. when running under systemd with a per-instance state dir).
 
 ## When to use this vs. the codex tab in the External Connect modal
 
