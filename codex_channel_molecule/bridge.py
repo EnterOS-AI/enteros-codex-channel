@@ -64,8 +64,13 @@ class _RealTools:
     """
 
     def __init__(self) -> None:
+        import molecule_runtime.inbox as inbox
+        from molecule_runtime.a2a_client import PLATFORM_URL, WORKSPACE_ID
         from molecule_runtime import a2a_tools
 
+        state = inbox.InboxState(cursor_path=inbox.default_cursor_path())
+        inbox.activate(state)
+        inbox.start_poller_thread(state, PLATFORM_URL, WORKSPACE_ID)
         self._tools = a2a_tools
 
     async def wait_for_message(self, timeout_secs: float) -> str:
@@ -253,6 +258,16 @@ async def _handle_one(
     )
 
     result: CodexResult = await runner.run(message=body, session_id=session_id)
+    logger.info(
+        "codex result for %s: exit=%s session=%s stdout=%d stderr_tail=%d",
+        activity_id,
+        result.exit_code,
+        result.session_id or "none",
+        len(result.text),
+        len(result.stderr_tail),
+    )
+    if result.exit_code != 0:
+        logger.warning("codex stderr tail for %s: %s", activity_id, result.stderr_tail)
     if result.session_id and result.session_id != session_id:
         store.set(chat_id, result.session_id)
 

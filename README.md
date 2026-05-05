@@ -55,6 +55,14 @@ codex-channel-molecule
 
 The daemon runs in the foreground; logs go to stderr. For systemd hosts, register a unit; for one-off use, `nohup ... &` plus a log file works.
 
+### Running under launchd / systemd (Node-on-PATH note)
+
+The codex binary is a `#!/usr/bin/env node` shim, so spawning it requires `node` to be discoverable on PATH. Under an interactive shell that's automatic; under `launchd` (macOS) and stripped-down `systemd` units PATH defaults to `/usr/bin:/bin`, and `env node` will 127-out silently.
+
+Since 0.1.2 the daemon resolves `codex` to its absolute path and prepends that directory to the subprocess PATH automatically — Node lives next to `codex` under nvm / brew / pnpm-global, so the shim's `env node` finds it. Operators typically don't need any PATH plumbing in their LaunchAgent / unit file beyond the three required env vars.
+
+If you're on an unusual install layout where `codex` and `node` live in different directories, set the LaunchAgent / unit `PATH` explicitly to include both.
+
 ## Deprecation path
 
 When [`openai/codex#17543`](https://github.com/openai/codex/issues/17543) lands upstream — a generic path for handling MCP custom notifications in codex and forwarding them into the active session as user submissions — this daemon becomes redundant. Codex itself will accept inbound molecule messages as `Op::UserInput` directly through the MCP server already wired in `~/.codex/config.toml`. Until then, this is the operator-facing answer.
