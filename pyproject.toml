@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-channel-molecule"
-version = "0.1.0"
+version = "0.1.1"
 description = "Bridge daemon for codex CLI ↔ Molecule platform — long-polls the platform inbox, runs `codex exec --resume <session>` per inbound message, replies via send_message_to_user MCP tool. Counterpart to hermes-channel-molecule."
 readme = "README.md"
 requires-python = ">=3.11"
