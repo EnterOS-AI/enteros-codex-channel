@@ -69,6 +69,31 @@ class CodexRunner:
             )
         self._codex_bin = resolved
         self._timeout_secs = timeout_secs
+        # The codex binary is a `#!/usr/bin/env node` shim, so spawning
+        # it requires `node` to be discoverable via the subprocess PATH.
+        # Under a shell launch this is fine (operator's interactive PATH
+        # has Node), but launchd and most systemd unit defaults strip
+        # PATH down to /usr/bin:/bin — `env node` then 127s out and the
+        # daemon silently fails on every turn.
+        #
+        # Fix: remember the directory containing the resolved codex
+        # binary. Node lives next to it under nvm / brew / pnpm
+        # global installs. Subprocesses get that dir prepended to their
+        # PATH (see _build_env). Operators don't have to thread PATH
+        # through their LaunchAgent / unit file — just $WORKSPACE_ID,
+        # $PLATFORM_URL, $MOLECULE_WORKSPACE_TOKEN per the install
+        # contract.
+        self._codex_bin_dir = os.path.dirname(resolved)
+
+    def _build_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        existing_path = env.get("PATH", "")
+        if self._codex_bin_dir not in existing_path.split(os.pathsep):
+            env["PATH"] = (
+                self._codex_bin_dir
+                + (os.pathsep + existing_path if existing_path else "")
+            )
+        return env
 
     async def run(
         self,
@@ -81,16 +106,23 @@ class CodexRunner:
         that session. When None, codex starts a fresh session and assigns
         a new id (returned in CodexResult.session_id).
         """
-        args: list[str] = [self._codex_bin, "exec", "--skip-git-repo-check"]
         if session_id:
-            args.extend(["--resume", session_id])
-        args.append(message)
+            args = [
+                self._codex_bin,
+                "exec",
+                "resume",
+                "--skip-git-repo-check",
+                session_id,
+                message,
+            ]
+        else:
+            args = [self._codex_bin, "exec", "--skip-git-repo-check", message]
 
         proc = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=os.environ.copy(),
+            env=self._build_env(),
         )
 
         try:
