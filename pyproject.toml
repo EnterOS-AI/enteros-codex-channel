@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-channel-molecule"
+version = "0.1.0"
+description = "Bridge daemon for codex CLI ↔ Molecule platform — long-polls the platform inbox, runs `codex exec --resume <session>` per inbound message, replies via send_message_to_user MCP tool. Counterpart to hermes-channel-molecule."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Molecule AI" }]
+dependencies = [
+    "molecule-ai-workspace-runtime>=0.1.110",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+codex-channel-molecule = "codex_channel_molecule.daemon:main"
+
+[project.urls]
+Homepage = "https://github.com/Molecule-AI/codex-channel-molecule"
+Repository = "https://github.com/Molecule-AI/codex-channel-molecule"
+
+[tool.setuptools.packages.find]
+include = ["codex_channel_molecule*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
