@@ -2,7 +2,7 @@
 
 Bridge daemon — gives [codex CLI](https://github.com/openai/codex) push parity with the [Molecule AI](https://moleculesai.com) platform's other external runtimes.
 
-The Molecule platform's [`hermes-channel-molecule`](https://github.com/Molecule-AI/hermes-channel-molecule) plugin gives `hermes-agent` true push delivery — peer agents and canvas-user messages land mid-session as conversation turns. Codex CLI has no plugin API today and its MCP runtime drops inbound notifications, so this daemon is the equivalent push surface — built outside the codex process.
+The Molecule platform's [`hermes-channel-molecule`](https://git.moleculesai.app/molecule-ai/hermes-channel-molecule) plugin gives `hermes-agent` true push delivery — peer agents and canvas-user messages land mid-session as conversation turns. Codex CLI has no plugin API today and its MCP runtime drops inbound notifications, so this daemon is the equivalent push surface — built outside the codex process.
 
 ## How it works
 
@@ -70,7 +70,7 @@ When [`openai/codex#17543`](https://github.com/openai/codex/issues/17543) lands 
 ## Development
 
 ```sh
-git clone https://github.com/Molecule-AI/codex-channel-molecule
+git clone https://git.moleculesai.app/molecule-ai/codex-channel-molecule.git
 cd codex-channel-molecule
 pip install -e ".[test]"
 pytest -q
