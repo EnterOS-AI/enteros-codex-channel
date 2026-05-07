@@ -49,7 +49,7 @@ jobs:
           /tmp/install-test/bin/pip install dist/*.whl
           /tmp/install-test/bin/codex-channel-molecule --help
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3 # pinned to v3 for Gitea act_runner v0.6 compatibility (internal#46)
         with:
           name: dist
           path: dist/
@@ -61,7 +61,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3 # pinned to v3 for Gitea act_runner v0.6 compatibility (internal#46)
         with:
           name: dist
           path: dist/
