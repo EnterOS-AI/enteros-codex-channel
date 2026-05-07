@@ -24,8 +24,8 @@ test = [
 codex-channel-molecule = "codex_channel_molecule.daemon:main"
 
 [project.urls]
-Homepage = "https://github.com/Molecule-AI/codex-channel-molecule"
-Repository = "https://github.com/Molecule-AI/codex-channel-molecule"
+Homepage = "https://git.moleculesai.app/molecule-ai/codex-channel-molecule"
+Repository = "https://git.moleculesai.app/molecule-ai/codex-channel-molecule"
 
 [tool.setuptools.packages.find]
 include = ["codex_channel_molecule*"]
