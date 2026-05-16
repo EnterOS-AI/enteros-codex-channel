@@ -9,15 +9,20 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
 
+# Post-2026-05-06 (Molecule-AI GitHub org suspension): PyPI's Trusted
+# Publisher OIDC flow only accepts GitHub/GitLab/Google/ActiveState
+# issuers — not Gitea. This workflow uses a long-lived PyPI API token
+# stored as the repo-level secret PYPI_TOKEN, fanned out from the
+# operator-host SSOT (/etc/molecule-bootstrap/all-credentials.env) by
+# /opt/molecule-bootstrap/sync-pypi-token.sh.
 permissions:
   contents: read
-  # OIDC token for PyPI trusted-publisher auth — no secret token needed.
-  # PyPI side: register
-  #   github.com/Molecule-AI/codex-channel-molecule
-  #   workflow=publish.yml environment=pypi
-  # under "Trusted publisher management" on the codex-channel-molecule
-  # PyPI project page (see README "Releasing" section).
-  id-token: write
+
+# Serialize tag-driven publishes so two concurrent tag pushes don't both
+# try to upload the same version and race PyPI.
+concurrency:
+  group: publish-pypi
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -40,7 +45,7 @@ jobs:
 
       - name: Build sdist + wheel
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install --upgrade pip build twine
           python -m build
 
       - name: Smoke-import the built wheel
@@ -48,6 +53,9 @@ jobs:
           python -m venv /tmp/install-test
           /tmp/install-test/bin/pip install dist/*.whl
           /tmp/install-test/bin/codex-channel-molecule --help
+
+      - name: Verify package metadata (twine check)
+        run: python -m twine check dist/*
 
       - uses: actions/upload-artifact@v3 # pinned to v3 for Gitea act_runner v0.6 compatibility (internal#46)
         with:
@@ -57,13 +65,31 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
     steps:
       - uses: actions/download-artifact@v3 # pinned to v3 for Gitea act_runner v0.6 compatibility (internal#46)
         with:
           name: dist
           path: dist/
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Publish to PyPI
+        # PYPI_TOKEN: repo-level Gitea Actions secret, written by
+        # /opt/molecule-bootstrap/sync-pypi-token.sh from the operator-host
+        # SSOT. Never set this by hand — rotate via the SSOT instead
+        # (ops/PYPI_TOKEN_ROTATION.md in operator-config).
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          if [ -z "$PYPI_TOKEN" ]; then
+            echo "::error::PYPI_TOKEN secret is not set. Run sync-pypi-token.sh on the operator host to fan it out from SSOT."
+            exit 1
+          fi
+          python -m pip install --upgrade twine
+          python -m twine upload \
+            --repository pypi \
+            --username __token__ \
+            --password "$PYPI_TOKEN" \
+            dist/*

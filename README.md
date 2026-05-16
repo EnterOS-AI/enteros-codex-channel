@@ -80,7 +80,7 @@ Tests are entirely real-subprocess (no mocking the spawn boundary) so the boot p
 
 ## Releasing
 
-Tag-on-push triggers `publish.yml` which builds + publishes to PyPI via OIDC trusted publishing (no API token needed).
+Tag-on-push triggers `.gitea/workflows/publish.yml` which builds + publishes to PyPI via `twine upload` using the `PYPI_TOKEN` repo-level Gitea Actions secret.
 
 ```sh
 # Bump pyproject.toml `version`, commit, then:
@@ -89,19 +89,11 @@ git tag v0.1.1 && git push origin v0.1.1
 
 The workflow refuses to publish if the tag doesn't match `pyproject.toml`'s `version` — keeps PyPI versions and git tags in lockstep.
 
-**One-time PyPI setup** (before the first release):
+### Why twine, not Trusted Publisher OIDC
 
-1. Create the project on PyPI by uploading the first wheel manually, OR
-2. Pre-register the project on PyPI under a "Pending publisher" config so the first tagged push creates it.
+Post-2026-05-06 (Molecule-AI GitHub-org suspension) the canonical SCM is Gitea. PyPI's Trusted-Publisher OIDC flow only recognises GitHub / GitLab / Google / ActiveState issuers — not Gitea — so this repo (and every other PyPI-publishing repo in `molecule-ai/*`) falls back to a long-lived API token.
 
-Either way, on the project's PyPI page → "Manage" → "Publishing" → "Add a new publisher", configure:
-
-- Owner: `Molecule-AI`
-- Repository: `codex-channel-molecule`
-- Workflow filename: `publish.yml`
-- Environment name: `pypi`
-
-After this, every `git push origin v*.*.*` ships the wheel to PyPI without any further intervention.
+The `PYPI_TOKEN` secret is **not set by hand**. It is fanned out from the operator-host SSOT (`/etc/molecule-bootstrap/all-credentials.env`) by `/opt/molecule-bootstrap/sync-pypi-token.sh` (see [operator-config/etc/pypi-publishers.yaml](https://git.moleculesai.app/molecule-ai/operator-config/src/branch/main/etc/pypi-publishers.yaml)). Rotation procedure: [PYPI_TOKEN_ROTATION.md](https://git.moleculesai.app/molecule-ai/operator-config/src/branch/main/ops/PYPI_TOKEN_ROTATION.md).
 
 ## License
 
