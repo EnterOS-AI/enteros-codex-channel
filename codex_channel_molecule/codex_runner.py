@@ -120,43 +120,24 @@ class CodexRunner:
 
         proc = await asyncio.create_subprocess_exec(
             *args,
-            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=self._build_env(),
         )
 
-        # Drain stdout/stderr concurrently so the pipe buffer never
-        # blocks codex's writer (#1684). A blocking communicate()
-        # alone deadlocks when codex writes >64 KB before exiting.
-        stdout_task = asyncio.create_task(proc.stdout.read())
-        stderr_task = asyncio.create_task(proc.stderr.read())
-
         try:
-            await asyncio.wait_for(proc.wait(), timeout=self._timeout_secs)
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=self._timeout_secs
+            )
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            # Cancel the drain tasks so the event loop doesn't complain
-            # about tasks reading from a closed stream.
-            stdout_task.cancel()
-            stderr_task.cancel()
-            # Best-effort await the cancelled tasks to avoid lingering
-            # Task exceptions on loop teardown.
-            for t in (stdout_task, stderr_task):
-                try:
-                    await t
-                except asyncio.CancelledError:
-                    pass
             return CodexResult(
                 text=f"(codex exec timed out after {self._timeout_secs:.0f}s)",
                 session_id=session_id,
                 exit_code=-1,
                 stderr_tail="timeout",
             )
-
-        stdout_bytes = await stdout_task
-        stderr_bytes = await stderr_task
 
         text = stdout_bytes.decode(errors="replace").strip()
         stderr = stderr_bytes.decode(errors="replace")
