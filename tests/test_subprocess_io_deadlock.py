@@ -3,7 +3,7 @@
 The confirmed bug: ``asyncio.create_subprocess_exec`` with ``stdout=PIPE`` and
 no concurrent stdout drain causes codex turns to wedge indefinitely when codex
 writes > 64 KB to stdout. The pipe buffer fills; codex blocks writing; the parent
-blocks on ``communicate()`` waiting for codex to exit; deadlock.
+blocks on ``wait()`` waiting for codex to exit; deadlock.
 
 The correct fix (in codex_runner.py):
   1. Close stdin before/after ``communicate()`` — signals EOF to codex so its
@@ -26,7 +26,7 @@ import textwrap
 import threading
 import time
 from pathlib import Path
-from typing import Tuple
+from typing import Optional, Tuple
 
 import pytest
 
@@ -79,15 +79,16 @@ def _make_burst_subprocess(tmp_path: Path, *, close_stdin: bool = False) -> Path
     return p
 
 
-def _run_buggy_pattern(script: Path) -> Tuple[int, float]:
-    """Spawn script with stdout=PIPE and block on communicate() — the buggy pattern.
+def _run_buggy_pattern(script: Path) -> Tuple[Optional[int], float]:
+    """Spawn script with stdout=PIPE and block on wait() — the buggy pattern.
 
     This is the exact pattern that caused #1684: no stdin close, no concurrent
-    drain, just communicate(). If this DOESN'T deadlock on modern Python,
-    the pipe-buffer behavior may have changed and this test needs redesign.
+    drain, just wait(). The child writes >64 KB to stdout; the pipe buffer
+    fills; the child blocks; the parent blocks on wait() forever; deadlock.
+
     We guard with a thread+timeout so a real deadlock doesn't wedge pytest.
     """
-    result = {"exit_code": None, "elapsed": None}
+    result: dict[str, any] = {"exit_code": None, "elapsed": None}
 
     def target():
         start = time.monotonic()
@@ -97,10 +98,14 @@ def _run_buggy_pattern(script: Path) -> Tuple[int, float]:
             stderr=subprocess.PIPE,
         )
         try:
-            # The buggy pattern: blocking communicate() with no stdin close
-            # and no concurrent drain.
-            stdout, stderr = proc.communicate()
+            # The buggy pattern: blocking wait() with no concurrent drain.
+            proc.wait(timeout=_TEST_DEADLINE_S + 5)
             result["exit_code"] = proc.returncode
+        except subprocess.TimeoutExpired:
+            # Reproduced the deadlock — kill the child so the thread exits.
+            proc.kill()
+            proc.wait()
+            result["exit_code"] = None
         except Exception as e:
             result["exit_code"] = -2
             result["error"] = str(e)
@@ -109,9 +114,9 @@ def _run_buggy_pattern(script: Path) -> Tuple[int, float]:
     t = threading.Thread(target=target)
     t.daemon = True
     t.start()
-    t.join(timeout=_TEST_DEADLINE_S + 5)
+    t.join(timeout=_TEST_DEADLINE_S + 10)
     if t.is_alive():
-        result["elapsed"] = _TEST_DEADLINE_S + 5
+        result["elapsed"] = _TEST_DEADLINE_S + 10
         result["exit_code"] = None
     return result.get("exit_code"), result.get("elapsed", 0.0)
 
@@ -121,11 +126,11 @@ def _run_buggy_pattern(script: Path) -> Tuple[int, float]:
 # ---------------------------------------------------------------------------
 
 def test_buggy_pattern_times_out(tmp_path: Path):
-    """Assert that the unpatched communicate()-only pattern deadlocks.
+    """Assert that the unpatched wait()-only pattern deadlocks.
 
     This test proves we are actually reproducing #1684: using ``Popen`` with
-    stdout=PIPE and calling ``communicate()`` without closing stdin causes
-    the child to wedge when it writes > 64 KB. The thread must time out.
+    stdout=PIPE and calling ``wait()`` without draining stdout concurrently
+    causes the child to wedge when it writes > 64 KB. The thread must time out.
 
     If this test PASSES (thread completes under _TEST_DEADLINE_S), either:
       - The pipe-buffer deadlock no longer occurs on this OS/Python version,
