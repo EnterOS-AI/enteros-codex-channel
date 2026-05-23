@@ -61,17 +61,20 @@ def _make_burst_subprocess(tmp_path: Path, *, close_stdin: bool = False) -> Path
     ) if close_stdin else (
         "import sys\n"
     )
-    p.write_text(textwrap.dedent(f"""\
-        #!/usr/bin/env python3
-        {stdin_close}
-        # Write enough bytes to overflow the default 64 KB pipe buffer.
-        # Writing raw bytes via sys.stdout.buffer avoids any buffering that
-        # could mask the deadlock (pure text write might flush incrementally).
-        sys.stdout.buffer.write(b"x" * ({_BURST_SIZE_KB * 1024}))
-        sys.stdout.buffer.flush()
-        sys.stderr.write("session: deadbeef-0000-0000-0000-000000000001\\n")
-        sys.stderr.flush()
-    """))
+    # Build the script without f-string + dedent to avoid multiline
+    # indent collapse (#1684 test helper bug).
+    script = (
+        "#!/usr/bin/env python3\n"
+        + stdin_close
+        + "# Write enough bytes to overflow the default 64 KB pipe buffer.\n"
+        + "# Writing raw bytes via sys.stdout.buffer avoids any buffering that\n"
+        + "# could mask the deadlock (pure text write might flush incrementally).\n"
+        + f"sys.stdout.buffer.write(b\"x\" * ({_BURST_SIZE_KB * 1024}))\n"
+        + "sys.stdout.buffer.flush()\n"
+        + "sys.stderr.write(\"session: deadbeef-0000-0000-0000-000000000001\\n\")\n"
+        + "sys.stderr.flush()\n"
+    )
+    p.write_text(script)
     p.chmod(0o755)
     return p
 
