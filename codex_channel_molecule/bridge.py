@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Protocol
 
@@ -126,9 +127,16 @@ class _SessionStore:
 
     def _flush(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_text(json.dumps(self._sessions, indent=2, sort_keys=True))
-        tmp.replace(self._path)
+        # Unique temp name avoids races if _flush is ever called concurrently
+        # (e.g. from overlapping bridge tasks or future parallelism).
+        tmp = self._path.with_suffix(f"{self._path.suffix}.tmp.{uuid.uuid4().hex}")
+        try:
+            tmp.write_text(json.dumps(self._sessions, indent=2, sort_keys=True))
+            tmp.replace(self._path)
+        finally:
+            # Clean up the temp file on the unlikely event replace() raises.
+            if tmp.exists():
+                tmp.unlink()
 
 
 def _state_dir() -> Path:
