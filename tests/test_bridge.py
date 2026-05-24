@@ -9,14 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
 from codex_channel_molecule.bridge import _SessionStore, run_bridge
 from codex_channel_molecule.codex_runner import CodexResult
-
 
 # ----------------------------------------------------------------------
 # Fakes
