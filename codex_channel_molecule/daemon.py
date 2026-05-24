@@ -85,6 +85,13 @@ async def _async_main(args: argparse.Namespace) -> int:
         except (asyncio.CancelledError, Exception):
             pass
 
+    # Propagate bridge crashes so systemd/docker know to restart us.
+    for t in done:
+        if t is bridge_task:
+            exc = t.exception()
+            if exc is not None:
+                raise exc
+
     return 0
 
 
