@@ -158,6 +158,17 @@ class CodexRunner:
         )
 
 
+import re
+
+# Two known shapes: "session: <uuid>" and "session_id=<uuid>".
+# Both are stderr-only. Compiled once at module load to avoid
+# re-compiling on every codex turn.
+_SESSION_ID_RE = re.compile(
+    r"session(?:[_ ]id)?[=:\s]+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+    re.IGNORECASE,
+)
+
+
 def _extract_session_id(stderr: str) -> Optional[str]:
     """Pull a session uuid out of codex's stderr banner.
 
@@ -167,13 +178,5 @@ def _extract_session_id(stderr: str) -> Optional[str]:
     the next turn starts a fresh session, costing context continuity
     but not breaking the message flow.
     """
-    import re
-
-    # Two known shapes: "session: <uuid>" and "session_id=<uuid>".
-    # Both are stderr-only.
-    pattern = re.compile(
-        r"session(?:[_ ]id)?[=:\s]+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
-        re.IGNORECASE,
-    )
-    m = pattern.search(stderr)
+    m = _SESSION_ID_RE.search(stderr)
     return m.group(1) if m else None
