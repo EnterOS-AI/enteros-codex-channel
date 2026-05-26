@@ -16,7 +16,6 @@ import pytest
 from codex_channel_molecule.bridge import _SessionStore, run_bridge
 from codex_channel_molecule.codex_runner import CodexResult
 
-
 # ----------------------------------------------------------------------
 # Fakes
 # ----------------------------------------------------------------------

@@ -19,7 +19,6 @@ from codex_channel_molecule.codex_runner import (
     _extract_session_id,
 )
 
-
 _FAKE_CODEX_SCRIPT = textwrap.dedent("""\
     #!/usr/bin/env python3
     \"\"\"Fake codex CLI for tests.
@@ -58,7 +57,10 @@ _FAKE_CODEX_SCRIPT = textwrap.dedent("""\
                 break
         msg = args[i] if i < len(args) else \"\"
 
-    sid = resume_id or os.environ.get(\"FAKE_NEW_SESSION_ID\", \"a1b2c3d4-1111-2222-3333-444455556666\")
+    sid = resume_id or os.environ.get(
+        "FAKE_NEW_SESSION_ID",
+        "a1b2c3d4-1111-2222-3333-444455556666",
+    )
     sys.stderr.write(f\"session: {sid}\\n\")
     sys.stderr.flush()
 
@@ -241,7 +243,8 @@ async def test_run_does_not_duplicate_codex_bin_dir_in_path(tmp_path):
     seen_path = result.text
     occurrences = seen_path.split(os.pathsep).count(str(bin_dir))
     assert occurrences == 1, (
-        f"expected codex_bin_dir to appear exactly once, got {occurrences}: {seen_path!r}"
+        "expected codex_bin_dir to appear exactly once, "
+        f"got {occurrences}: {seen_path!r}"
     )
 
 
