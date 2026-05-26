@@ -15,10 +15,18 @@ import asyncio
 import dataclasses
 import logging
 import os
+import re
 import shutil
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Pre-compiled regex for session-id extraction — called once per codex
+# invocation, so compiling at import avoids re-parsing the pattern.
+_SESSION_ID_RE = re.compile(
+    r"session(?:[_ ]id)?[=:\s]+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+    re.IGNORECASE,
+)
 
 # Codex's first turn in a fresh session writes a session_id to stderr
 # (``session: <uuid>``). The bridge captures it from CodexResult.session_id
@@ -156,18 +164,6 @@ class CodexRunner:
             exit_code=proc.returncode if proc.returncode is not None else -1,
             stderr_tail=stderr_tail,
         )
-
-
-import re
-
-# Two known shapes: "session: <uuid>" and "session_id=<uuid>".
-# Both are stderr-only. Compiled once at module load to avoid
-# re-compiling on every codex turn.
-_SESSION_ID_RE = re.compile(
-    r"session(?:[_ ]id)?[=:\s]+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
-    re.IGNORECASE,
-)
-
 
 def _extract_session_id(stderr: str) -> Optional[str]:
     """Pull a session uuid out of codex's stderr banner.
