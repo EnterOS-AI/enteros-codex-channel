@@ -11,10 +11,13 @@ on:
 
 # Post-2026-05-06 (Molecule-AI GitHub org suspension): PyPI's Trusted
 # Publisher OIDC flow only accepts GitHub/GitLab/Google/ActiveState
-# issuers — not Gitea. This workflow uses a long-lived PyPI API token
-# stored as the repo-level secret PYPI_TOKEN, fanned out from the
-# operator-host SSOT (/etc/molecule-bootstrap/all-credentials.env) by
-# /opt/molecule-bootstrap/sync-pypi-token.sh.
+# issuers — not Gitea. This workflow uses a long-lived PyPI API token.
+#
+# KMS migration: PYPI_TOKEN is now sourced at runtime from the Infisical
+# SSOT (prod /ci/pypi) via the INFISICAL_CI_* machine identity in the
+# "Fetch PYPI_TOKEN from Infisical KMS" step of the publish job, instead of
+# the repo-level Gitea Actions secret. The Gitea PYPI_TOKEN secret is
+# retained until a green run proves the fetch, then deleted.
 permissions:
   contents: read
 
@@ -75,16 +78,54 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Publish to PyPI
-        # PYPI_TOKEN: repo-level Gitea Actions secret, written by
-        # /opt/molecule-bootstrap/sync-pypi-token.sh from the operator-host
-        # SSOT. Never set this by hand — rotate via the SSOT instead
-        # (ops/PYPI_TOKEN_ROTATION.md in operator-config).
+      # KMS migration (Gitea-Actions-secrets -> Infisical SSOT): source
+      # PYPI_TOKEN from Infisical (prod /ci/pypi) via the INFISICAL_CI_*
+      # machine identity instead of the repo-level Gitea Actions secret,
+      # mirroring the proven molecule-core/molecule-controlplane KMS pattern
+      # (#971 / #3274). Exported to $GITHUB_ENV (masked) so the publish step
+      # below reads it as an env var. The Gitea PYPI_TOKEN secret is retained
+      # until a real green run proves this fetch (validate-before-delete).
+      #
+      # TRUSTED-REF: this workflow only triggers on `push: tags` (vX.Y.Z),
+      # which fork PRs cannot reach — so consuming the INFISICAL_CI_* identity
+      # here is safe (no untrusted-fork exposure).
+      - name: Fetch PYPI_TOKEN from Infisical KMS
+        id: pypi_token
         env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+          INFISICAL_CI_CLIENT_ID: ${{ secrets.INFISICAL_CI_CLIENT_ID }}
+          INFISICAL_CI_CLIENT_SECRET: ${{ secrets.INFISICAL_CI_CLIENT_SECRET }}
+          INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_CI_PROJECT_ID }}
+        run: |
+          set -uo pipefail
+          BASE="https://key.moleculesai.app"
+          TOK=$(curl -fsS -X POST "$BASE/api/v1/auth/universal-auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$INFISICAL_CI_CLIENT_ID\",\"clientSecret\":\"$INFISICAL_CI_CLIENT_SECRET\"}" \
+            | python3 -c 'import sys,json; v=json.load(sys.stdin).get("accessToken"); sys.stdout.write(v if isinstance(v,str) else "")')
+          if [ -z "$TOK" ]; then echo "::error::Infisical accessToken empty - failing closed"; exit 1; fi
+          read_secret() {
+            curl -fsS "$BASE/api/v3/secrets/raw/$1?workspaceId=$INFISICAL_PROJECT_ID&environment=prod&secretPath=$2" \
+              -H "Authorization: Bearer $TOK" \
+              | python3 -c 'import sys,json; v=json.load(sys.stdin).get("secret",{}).get("secretValue"); sys.stdout.write(v if isinstance(v,str) else "")'
+          }
+          PYPI_TOKEN=$(read_secret PYPI_TOKEN %2Fci%2Fpypi)
+          echo "::add-mask::$PYPI_TOKEN"
+          # Masking-control: assert NON-EMPTY and FAIL LOUD.
+          if [ -z "$PYPI_TOKEN" ]; then
+            echo "::error::Infisical returned empty PYPI_TOKEN at prod /ci/pypi — failing closed."
+            exit 1
+          fi
+          echo "PYPI_TOKEN=$PYPI_TOKEN" >> "$GITHUB_ENV"
+          echo "PYPI_TOKEN loaded from Infisical (len=${#PYPI_TOKEN})"
+
+      - name: Publish to PyPI
+        # PYPI_TOKEN now arrives via $GITHUB_ENV from the "Fetch PYPI_TOKEN
+        # from Infisical KMS" step above (Infisical SSOT: prod /ci/pypi),
+        # replacing the repo-level Gitea Actions secret. The Gitea secret is
+        # retained until this fetch is proven by a green run, then deleted.
         run: |
           if [ -z "$PYPI_TOKEN" ]; then
-            echo "::error::PYPI_TOKEN secret is not set. Run sync-pypi-token.sh on the operator host to fan it out from SSOT."
+            echo "::error::PYPI_TOKEN is empty. Expected it from the 'Fetch PYPI_TOKEN from Infisical KMS' step (prod /ci/pypi)."
             exit 1
           fi
           python -m pip install --upgrade twine
