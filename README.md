@@ -30,16 +30,31 @@ Per chat thread (one canvas-user thread or one peer-workspace thread) gets its o
 
 ## When to use this vs. the codex tab in the External Connect modal
 
-The codex tab wires the molecule MCP server into `~/.codex/config.toml` so codex can call platform tools (`list_peers`, `delegate_task`, `send_message_to_user`, `commit_memory`, etc.). That's outbound — codex calls out to the platform.
+The Codex tab wires the Molecule MCP server into `~/.codex/config.toml` so Codex can call platform tools (`list_peers`, `delegate_task`, `send_message_to_user`, `commit_memory`, etc.). That's outbound — Codex calls out to the platform.
 
-This daemon is the inbound counterpart — the platform pushes to codex. Run both for full bidirectional integration.
+This daemon is the inbound counterpart: it long-polls the platform inbox and turns each message into a Codex turn. Run both for full bidirectional integration.
 
 ## Install
 
 ```sh
-npm install -g @openai/codex@^0.57
-pip install codex-channel-molecule
+npm install -g @openai/codex@latest
+
+PRIVATE_WHEELS="$(mktemp -d)"
+python3 -m pip download --no-deps --dest "$PRIVATE_WHEELS" \
+  --index-url https://git.moleculesai.app/api/packages/molecule-ai/pypi/simple/ \
+  molecules-workspace-runtime==0.4.4 \
+  codex-channel-molecule==0.1.4
+python3 -m pip install --index-url https://pypi.org/simple/ \
+  "$PRIVATE_WHEELS"/molecules_workspace_runtime-*.whl \
+  "$PRIVATE_WHEELS"/codex_channel_molecule-*.whl
+rm -rf "$PRIVATE_WHEELS"
 ```
+
+Both Molecule-owned wheels come from the internal Gitea registry. That registry
+does not proxy public dependencies, so the install deliberately downloads the
+private wheels without dependencies and then lets public PyPI resolve only the
+dependencies of those local artifacts. Do not replace this with an unrestricted
+`--extra-index-url`; that makes package selection ambiguous across registries.
 
 ## Configure + run
 
@@ -65,14 +80,23 @@ If you're on an unusual install layout where `codex` and `node` live in differen
 
 ## Deprecation path
 
-When [`openai/codex#17543`](https://github.com/openai/codex/issues/17543) lands upstream — a generic path for handling MCP custom notifications in codex and forwarding them into the active session as user submissions — this daemon becomes redundant. Codex itself will accept inbound molecule messages as `Op::UserInput` directly through the MCP server already wired in `~/.codex/config.toml`. Until then, this is the operator-facing answer.
+[`openai/codex#17543`](https://github.com/openai/codex/issues/17543) remains open. When Codex gains that generic path for injecting MCP custom notifications into an active session, this daemon can become redundant; until then, it provides the supported inbound bridge.
 
 ## Development
 
 ```sh
 git clone https://git.moleculesai.app/molecule-ai/codex-channel-molecule.git
 cd codex-channel-molecule
-pip install -e ".[test]"
+
+RUNTIME_WHEEL="$(mktemp -d)"
+python3 -m pip download --no-deps --dest "$RUNTIME_WHEEL" \
+  --index-url https://git.moleculesai.app/api/packages/molecule-ai/pypi/simple/ \
+  molecules-workspace-runtime==0.4.4
+python3 -m pip install --index-url https://pypi.org/simple/ \
+  "$RUNTIME_WHEEL"/molecules_workspace_runtime-*.whl \
+  pytest pytest-asyncio
+rm -rf "$RUNTIME_WHEEL"
+python3 -m pip install --no-deps -e .
 pytest -q
 ```
 
@@ -80,20 +104,26 @@ Tests are entirely real-subprocess (no mocking the spawn boundary) so the boot p
 
 ## Releasing
 
-Tag-on-push triggers `.gitea/workflows/publish.yml` which builds + publishes to PyPI via `twine upload` using the `PYPI_TOKEN` repo-level Gitea Actions secret.
+Releases are tag-driven and publish to the Molecule AI Gitea package registry.
+Routine development still lands through reviewed PRs; after the version bump is
+merged to `main`, push the matching tag:
 
 ```sh
-# Bump pyproject.toml `version`, commit, then:
-git tag v0.1.1 && git push origin v0.1.1
+# For the version currently declared in pyproject.toml:
+git tag v0.1.4 && git push origin v0.1.4
 ```
 
-The workflow refuses to publish if the tag doesn't match `pyproject.toml`'s `version` — keeps PyPI versions and git tags in lockstep.
+`.gitea/workflows/publish.yml` refuses a tag that does not match
+`pyproject.toml`, builds and smoke-tests the wheel, publishes only this
+project's wheel and sdist, then verifies an anonymous clean install from the
+Gitea registry.
 
-### Why twine, not Trusted Publisher OIDC
+### Publisher credential
 
-Post-2026-05-06 (Molecule-AI GitHub-org suspension) the canonical SCM is Gitea. PyPI's Trusted-Publisher OIDC flow only recognises GitHub / GitLab / Google / ActiveState issuers — not Gitea — so this repo (and every other PyPI-publishing repo in `molecule-ai/*`) falls back to a long-lived API token.
-
-The `PYPI_TOKEN` secret is **not set by hand**. It is fanned out from the operator-host SSOT (`/etc/molecule-bootstrap/all-credentials.env`) by `/opt/molecule-bootstrap/sync-pypi-token.sh` (see [operator-config/etc/pypi-publishers.yaml](https://git.moleculesai.app/molecule-ai/operator-config/src/branch/main/etc/pypi-publishers.yaml)). Rotation procedure: [PYPI_TOKEN_ROTATION.md](https://git.moleculesai.app/molecule-ai/operator-config/src/branch/main/ops/PYPI_TOKEN_ROTATION.md).
+The publish job reads the least-privilege `MOL_PACKAGE_TOKEN` from Infisical
+(`prod /ci/gitea-pypi-publisher`) at runtime. It fails closed when the machine
+identity or secret is absent. There is no operator host and no local credential
+bundle in this release path.
 
 ## License
 

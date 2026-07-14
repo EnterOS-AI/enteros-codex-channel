@@ -4,26 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-channel-molecule"
-version = "0.1.3"
+version = "0.1.4"
 description = "Bridge daemon for codex CLI ↔ Molecule platform — long-polls the platform inbox, runs `codex exec --resume <session>` per inbound message, replies via send_message_to_user MCP tool. Counterpart to hermes-channel-molecule."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [{ name = "Molecule AI" }]
 dependencies = [
-    # Floor raised from 0.1.110 → 0.1.129 to pull in the SSOT A2A response
-    # parser (a2a_response.py, introduced 0.1.129). Pre-0.1.129 the legacy
-    # inline sniffer in a2a_client.send_a2a_message treated the poll-mode
-    # ``{"status": "queued", "delivery_mode": "poll", "method": "..."}``
-    # envelope as malformed and surfaced ``[A2A_ERROR] unexpected response
-    # shape (no result, no error): ...`` on every reply attempt — that
-    # then propagated to canvas as the workspace's task label and triggered
-    # a ~3s retry storm. The 0.1.129+ runtime classifies the envelope as
-    # ``Queued`` and short-circuits to the durable /delegate-poll path
-    # (a2a_tools_delegation._delegate_sync_via_polling). See
-    # ``molecule-ai/internal#424`` and ``molecule-core#2967`` for the
-    # full incident + fix history.
-    "molecule-ai-workspace-runtime>=0.1.129",
+    # The canonical distribution was renamed at 0.4.0. The retired
+    # molecule-ai-workspace-runtime name is a different package to pip and
+    # cannot satisfy this bridge. 0.4.4 contains the current standalone MCP
+    # contract and the typed queued-response parser required here.
+    "molecules-workspace-runtime>=0.4.4",
 ]
 
 [project.optional-dependencies]

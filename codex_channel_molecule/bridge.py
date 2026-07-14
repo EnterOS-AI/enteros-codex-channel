@@ -58,7 +58,7 @@ class _Tools(Protocol):
 
 class _RealTools:
     """Production implementation — calls into the installed
-    molecule-ai-workspace-runtime wheel.
+    molecules-workspace-runtime wheel.
 
     The wheel is imported lazily on first instantiation so unit tests
     that supply a fake `_Tools` don't require it.
