@@ -1,31 +1,22 @@
-name: Publish to PyPI
+name: Publish to Gitea package registry
 
-# Triggered on tag push (vX.Y.Z). Tag-on-push instead of release-creation
-# is the cheaper UX — `git tag v0.1.0 && git push origin v0.1.0` ships
-# without leaving the terminal.
 on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
 
-# Post-2026-05-06 (Molecule-AI GitHub org suspension): PyPI's Trusted
-# Publisher OIDC flow only accepts GitHub/GitLab/Google/ActiveState
-# issuers — not Gitea. This workflow uses a long-lived PyPI API token.
-#
-# KMS migration: PYPI_TOKEN is now sourced at runtime from the Infisical
-# SSOT (prod /ci/pypi) via the INFISICAL_CI_* machine identity in the
-# "Fetch PYPI_TOKEN from Infisical KMS" step of the publish job, instead of
-# the repo-level Gitea Actions secret. The Gitea PYPI_TOKEN secret is
-# retained until a green run proves the fetch, then deleted.
 permissions:
   contents: read
 
-# Serialize tag-driven publishes so two concurrent tag pushes don't both
-# try to upload the same version and race PyPI.
 concurrency:
-  group: publish-pypi
+  group: publish-gitea-pypi
   cancel-in-progress: false
+
+env:
+  GITEA_PYPI_SIMPLE_URL: https://git.moleculesai.app/api/packages/molecule-ai/pypi/simple/
+  GITEA_PYPI_UPLOAD_URL: https://git.moleculesai.app/api/packages/molecule-ai/pypi/
+  RUNTIME_VERSION: "0.4.4"
 
 jobs:
   build:
@@ -39,28 +30,48 @@ jobs:
 
       - name: Verify tag matches pyproject version
         run: |
+          set -eu
           tag="${GITHUB_REF#refs/tags/v}"
           pkg=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           if [ "$tag" != "$pkg" ]; then
-            echo "::error::tag $tag does not match pyproject version $pkg — aborting publish to keep PyPI in sync with git tags"
+            echo "::error::tag $tag does not match pyproject version $pkg"
             exit 1
           fi
 
-      - name: Build sdist + wheel
+      - name: Build and validate wheel and sdist
         run: |
+          set -eu
           python -m pip install --upgrade pip build twine
+          rm -rf dist
           python -m build
+          python -m twine check dist/*
+          set -- dist/codex_channel_molecule-*.whl dist/codex_channel_molecule-*.tar.gz
+          if [ "$#" -ne 2 ] || [ ! -e "$1" ] || [ ! -e "$2" ]; then
+            echo "::error::dist must contain exactly this project's wheel and sdist"
+            ls -la dist || true
+            exit 1
+          fi
 
-      - name: Smoke-import the built wheel
+      - name: Smoke-install the built wheel with the canonical runtime
         run: |
-          python -m venv /tmp/install-test
-          /tmp/install-test/bin/pip install dist/*.whl
-          /tmp/install-test/bin/codex-channel-molecule --help
+          set -eu
+          python -m venv /tmp/codex-channel-build-smoke
+          PIP=/tmp/codex-channel-build-smoke/bin/pip
+          RUNTIME_WHEEL=$(mktemp -d)
+          trap 'rm -rf "$RUNTIME_WHEEL" /tmp/codex-channel-build-smoke' EXIT
+          "$PIP" download --no-deps --dest "$RUNTIME_WHEEL" \
+            --index-url "$GITEA_PYPI_SIMPLE_URL" \
+            "molecules-workspace-runtime==$RUNTIME_VERSION"
+          "$PIP" install --index-url https://pypi.org/simple/ \
+            "$RUNTIME_WHEEL"/molecules_workspace_runtime-*.whl
+          "$PIP" install --no-deps dist/codex_channel_molecule-*.whl
+          WORKSPACE_ID=smoke-workspace \
+            PLATFORM_URL=https://example.invalid \
+            MOLECULE_WORKSPACE_TOKEN=smoke-token \
+            /tmp/codex-channel-build-smoke/bin/codex-channel-molecule --help
 
-      - name: Verify package metadata (twine check)
-        run: python -m twine check dist/*
-
-      - uses: actions/upload-artifact@v3 # pinned to v3 for Gitea act_runner v0.6 compatibility (internal#46)
+      # Gitea act_runner v0.6 does not support artifact v4 yet.
+      - uses: actions/upload-artifact@v3
         with:
           name: dist
           path: dist/
@@ -69,7 +80,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v3 # pinned to v3 for Gitea act_runner v0.6 compatibility (internal#46)
+      # Keep paired with upload-artifact v3 for Gitea act_runner v0.6.
+      - uses: actions/download-artifact@v3
         with:
           name: dist
           path: dist/
@@ -78,59 +90,107 @@ jobs:
         with:
           python-version: "3.12"
 
-      # KMS migration (Gitea-Actions-secrets -> Infisical SSOT): source
-      # PYPI_TOKEN from Infisical (prod /ci/pypi) via the INFISICAL_CI_*
-      # machine identity instead of the repo-level Gitea Actions secret,
-      # mirroring the proven molecule-core/molecule-controlplane KMS pattern
-      # (#971 / #3274). Exported to $GITHUB_ENV (masked) so the publish step
-      # below reads it as an env var. The Gitea PYPI_TOKEN secret is retained
-      # until a real green run proves this fetch (validate-before-delete).
-      #
-      # TRUSTED-REF: this workflow only triggers on `push: tags` (vX.Y.Z),
-      # which fork PRs cannot reach — so consuming the INFISICAL_CI_* identity
-      # here is safe (no untrusted-fork exposure).
-      - name: Fetch PYPI_TOKEN from Infisical KMS
-        id: pypi_token
+      - name: Fetch Gitea package-publisher token from Infisical SSOT
         env:
           INFISICAL_CI_CLIENT_ID: ${{ secrets.INFISICAL_CI_CLIENT_ID }}
           INFISICAL_CI_CLIENT_SECRET: ${{ secrets.INFISICAL_CI_CLIENT_SECRET }}
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_CI_PROJECT_ID }}
         run: |
           set -uo pipefail
-          BASE="https://key.moleculesai.app"
-          TOK=$(curl -fsS -X POST "$BASE/api/v1/auth/universal-auth/login" \
-            -H 'Content-Type: application/json' \
-            -d "{\"clientId\":\"$INFISICAL_CI_CLIENT_ID\",\"clientSecret\":\"$INFISICAL_CI_CLIENT_SECRET\"}" \
-            | python3 -c 'import sys,json; v=json.load(sys.stdin).get("accessToken"); sys.stdout.write(v if isinstance(v,str) else "")')
-          if [ -z "$TOK" ]; then echo "::error::Infisical accessToken empty - failing closed"; exit 1; fi
-          read_secret() {
-            curl -fsS "$BASE/api/v3/secrets/raw/$1?workspaceId=$INFISICAL_PROJECT_ID&environment=prod&secretPath=$2" \
-              -H "Authorization: Bearer $TOK" \
-              | python3 -c 'import sys,json; v=json.load(sys.stdin).get("secret",{}).get("secretValue"); sys.stdout.write(v if isinstance(v,str) else "")'
-          }
-          PYPI_TOKEN=$(read_secret PYPI_TOKEN %2Fci%2Fpypi)
-          echo "::add-mask::$PYPI_TOKEN"
-          # Masking-control: assert NON-EMPTY and FAIL LOUD.
-          if [ -z "$PYPI_TOKEN" ]; then
-            echo "::error::Infisical returned empty PYPI_TOKEN at prod /ci/pypi — failing closed."
+          BASE=https://key.moleculesai.app
+          if [ -z "${INFISICAL_CI_CLIENT_ID:-}" ] || \
+             [ -z "${INFISICAL_CI_CLIENT_SECRET:-}" ] || \
+             [ -z "${INFISICAL_PROJECT_ID:-}" ]; then
+            echo "::error::Infisical CI machine identity is incomplete"
             exit 1
           fi
-          echo "PYPI_TOKEN=$PYPI_TOKEN" >> "$GITHUB_ENV"
-          echo "PYPI_TOKEN loaded from Infisical (len=${#PYPI_TOKEN})"
+          TOK=$(curl -fsS -A curl/8.4.0 -X POST "$BASE/api/v1/auth/universal-auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$INFISICAL_CI_CLIENT_ID\",\"clientSecret\":\"$INFISICAL_CI_CLIENT_SECRET\"}" \
+            | python3 -c 'import json,sys; v=json.load(sys.stdin).get("accessToken"); print(v if isinstance(v,str) else "")')
+          if [ -z "$TOK" ]; then
+            echo "::error::Infisical login returned no access token"
+            exit 1
+          fi
+          MOL_PACKAGE_TOKEN=$(curl -fsS -A curl/8.4.0 \
+            "$BASE/api/v3/secrets/raw/MOL_PACKAGE_TOKEN?workspaceId=$INFISICAL_PROJECT_ID&environment=prod&secretPath=%2Fci%2Fgitea-pypi-publisher" \
+            -H "Authorization: Bearer $TOK" \
+            | python3 -c 'import json,sys; v=(json.load(sys.stdin).get("secret") or {}).get("secretValue"); print(v if isinstance(v,str) else "")')
+          if [ -z "$MOL_PACKAGE_TOKEN" ]; then
+            echo "::error::Infisical returned no MOL_PACKAGE_TOKEN at prod /ci/gitea-pypi-publisher"
+            exit 1
+          fi
+          echo "::add-mask::$MOL_PACKAGE_TOKEN"
+          echo "MOL_PACKAGE_TOKEN=$MOL_PACKAGE_TOKEN" >> "$GITHUB_ENV"
 
-      - name: Publish to PyPI
-        # PYPI_TOKEN now arrives via $GITHUB_ENV from the "Fetch PYPI_TOKEN
-        # from Infisical KMS" step above (Infisical SSOT: prod /ci/pypi),
-        # replacing the repo-level Gitea Actions secret. The Gitea secret is
-        # retained until this fetch is proven by a green run, then deleted.
+      - name: Publish missing artifacts to Gitea
+        env:
+          MOL_PACKAGE_TOKEN: ${{ env.MOL_PACKAGE_TOKEN }}
         run: |
-          if [ -z "$PYPI_TOKEN" ]; then
-            echo "::error::PYPI_TOKEN is empty. Expected it from the 'Fetch PYPI_TOKEN from Infisical KMS' step (prod /ci/pypi)."
+          set -euo pipefail
+          if [ -z "${MOL_PACKAGE_TOKEN:-}" ]; then
+            echo "::error::MOL_PACKAGE_TOKEN was not exported by the Infisical step"
             exit 1
           fi
           python -m pip install --upgrade twine
-          python -m twine upload \
-            --repository pypi \
-            --username __token__ \
-            --password "$PYPI_TOKEN" \
-            dist/*
+          shopt -s nullglob
+          artifacts=(dist/codex_channel_molecule-*.whl dist/codex_channel_molecule-*.tar.gz)
+          if [ "${#artifacts[@]}" -ne 2 ]; then
+            echo "::error::expected one codex-channel-molecule wheel and one sdist"
+            ls -la dist || true
+            exit 1
+          fi
+          INDEX=$(curl -fsS -A curl/8.4.0 \
+            "${GITEA_PYPI_SIMPLE_URL}codex-channel-molecule/" 2>/dev/null || true)
+          missing=()
+          for artifact in "${artifacts[@]}"; do
+            base=$(basename "$artifact")
+            if printf '%s' "$INDEX" | grep -qF "$base"; then
+              echo "::notice::$base already exists; leaving it untouched"
+            else
+              missing+=("$artifact")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            python -m twine upload \
+              --repository-url "$GITEA_PYPI_UPLOAD_URL" \
+              --username pypi-publisher \
+              --password "$MOL_PACKAGE_TOKEN" \
+              "${missing[@]}"
+          fi
+
+      - name: Verify anonymous clean install from Gitea
+        run: |
+          set -eu
+          version="${GITHUB_REF#refs/tags/v}"
+          python -m venv /tmp/codex-channel-registry-smoke
+          PIP=/tmp/codex-channel-registry-smoke/bin/pip
+          PY=/tmp/codex-channel-registry-smoke/bin/python
+          PRIVATE_WHEELS=$(mktemp -d)
+          trap 'rm -rf "$PRIVATE_WHEELS" /tmp/codex-channel-registry-smoke' EXIT
+          downloaded=0
+          for attempt in 1 2 3 4 5; do
+            rm -rf "$PRIVATE_WHEELS"
+            mkdir -p "$PRIVATE_WHEELS"
+            if "$PIP" download --no-deps --dest "$PRIVATE_WHEELS" \
+              --index-url "$GITEA_PYPI_SIMPLE_URL" \
+              "molecules-workspace-runtime==$RUNTIME_VERSION" \
+              "codex-channel-molecule==$version"; then
+              downloaded=1
+              break
+            fi
+            echo "registry read-back attempt $attempt failed; retrying"
+            sleep 2
+          done
+          if [ "$downloaded" -ne 1 ]; then
+            echo "::error::published bridge was not readable from the Gitea registry"
+            exit 1
+          fi
+          "$PIP" install --index-url https://pypi.org/simple/ \
+            "$PRIVATE_WHEELS"/molecules_workspace_runtime-*.whl \
+            "$PRIVATE_WHEELS"/codex_channel_molecule-*.whl
+          BRIDGE_VERSION="$version" "$PY" -c 'import importlib.metadata as m, os; assert m.version("codex-channel-molecule") == os.environ["BRIDGE_VERSION"]'
+          WORKSPACE_ID=smoke-workspace \
+            PLATFORM_URL=https://example.invalid \
+            MOLECULE_WORKSPACE_TOKEN=smoke-token \
+            /tmp/codex-channel-registry-smoke/bin/codex-channel-molecule --help
