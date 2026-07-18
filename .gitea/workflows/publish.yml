@@ -16,7 +16,7 @@ concurrency:
 env:
   GITEA_PYPI_SIMPLE_URL: https://git.moleculesai.app/api/packages/molecule-ai/pypi/simple/
   GITEA_PYPI_UPLOAD_URL: https://git.moleculesai.app/api/packages/molecule-ai/pypi/
-  RUNTIME_VERSION: "0.4.4"
+  RUNTIME_VERSION: "0.4.26"
 
 jobs:
   build:
@@ -71,7 +71,7 @@ jobs:
             /tmp/codex-channel-build-smoke/bin/codex-channel-molecule --help
 
       # Gitea act_runner v0.6 does not support artifact v4 yet.
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Keep paired with upload-artifact v3 for Gitea act_runner v0.6.
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
