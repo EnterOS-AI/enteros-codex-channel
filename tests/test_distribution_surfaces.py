@@ -30,7 +30,7 @@ def test_readme_documents_a_clean_dependency_safe_install() -> None:
     for required in (
         "download --no-deps",
         PRIVATE_SIMPLE,
-        "molecules-workspace-runtime==0.4.4",
+        "molecules-workspace-runtime==0.4.26",
         "codex-channel-molecule==0.1.4",
         "pip install --index-url https://pypi.org/simple/",
     ):
@@ -50,7 +50,7 @@ def test_ci_bootstraps_the_private_runtime_without_an_extra_index() -> None:
 
     assert "pip download --no-deps" in workflow
     assert PRIVATE_SIMPLE in workflow
-    assert "molecules-workspace-runtime==0.4.4" in workflow
+    assert "molecules-workspace-runtime==0.4.26" in workflow
     assert "pip install --no-deps -e ." in workflow
     assert "--extra-index-url" not in workflow
 
@@ -64,10 +64,15 @@ def test_publish_targets_gitea_with_the_infisical_package_identity() -> None:
         "%2Fci%2Fgitea-pypi-publisher",
         "--repository-url",
         "download --no-deps",
-        'RUNTIME_VERSION: "0.4.4"',
+        'RUNTIME_VERSION: "0.4.26"',
         "molecules-workspace-runtime==$RUNTIME_VERSION",
     ):
         assert required in workflow
+
+    assert "actions/upload-artifact@v3" not in workflow
+    assert "actions/download-artifact@v3" not in workflow
+    assert "actions/upload-artifact@v4" in workflow
+    assert "actions/download-artifact@v4" in workflow
 
     for retired in ("PYPI_TOKEN", "/ci/pypi", "--repository pypi"):
         assert retired not in workflow
