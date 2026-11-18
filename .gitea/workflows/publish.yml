@@ -16,7 +16,7 @@ concurrency:
 env:
   GITEA_PYPI_SIMPLE_URL: https://git.moleculesai.app/api/packages/molecule-ai/pypi/simple/
   GITEA_PYPI_UPLOAD_URL: https://git.moleculesai.app/api/packages/molecule-ai/pypi/
-  RUNTIME_VERSION: "0.4.26"
+  RUNTIME_VERSION: "0.4.98"
 
 jobs:
   build:

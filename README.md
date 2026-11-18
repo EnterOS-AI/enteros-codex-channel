@@ -42,7 +42,7 @@ npm install -g @openai/codex@latest
 PRIVATE_WHEELS="$(mktemp -d)"
 python3 -m pip download --no-deps --dest "$PRIVATE_WHEELS" \
   --index-url https://git.moleculesai.app/api/packages/molecule-ai/pypi/simple/ \
-  molecules-workspace-runtime==0.4.26 \
+  molecules-workspace-runtime==0.4.98 \
   codex-channel-molecule==0.1.4
 python3 -m pip install --index-url https://pypi.org/simple/ \
   "$PRIVATE_WHEELS"/molecules_workspace_runtime-*.whl \
@@ -91,7 +91,7 @@ cd codex-channel-molecule
 RUNTIME_WHEEL="$(mktemp -d)"
 python3 -m pip download --no-deps --dest "$RUNTIME_WHEEL" \
   --index-url https://git.moleculesai.app/api/packages/molecule-ai/pypi/simple/ \
-  molecules-workspace-runtime==0.4.26
+  molecules-workspace-runtime==0.4.98
 python3 -m pip install --index-url https://pypi.org/simple/ \
   "$RUNTIME_WHEEL"/molecules_workspace_runtime-*.whl \
   pytest pytest-asyncio
